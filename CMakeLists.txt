@@ -1,0 +1,98 @@
+cmake_minimum_required(VERSION 3.21)
+
+execute_process(
+  COMMAND git log -n 1 --pretty=format:%cs-%h
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE VERSION
+  OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if(VERSION STREQUAL "")
+  message(FATAL_ERROR "Failed to detect version")
+else()
+  message("Build version ${VERSION}")
+endif()
+
+project(
+  jsonfmt
+  DESCRIPTION "This is a tool to automate cosmetic fixes in C and C++ code"
+  LANGUAGES CXX)
+
+include(FetchContent)
+include(GNUInstallDirs)
+
+option(OPTION_DEBUG_USE_SANITIZERS "Use Sanitizers for Debug" ON)
+
+set(INSTALL_WIN32_SYMBOLS_DIR ${CMAKE_INSTALL_BINDIR})
+
+set(CMAKE_CXX_STANDARD
+    20
+    CACHE STRING "Default C++ standard")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+message("Using C++${CMAKE_CXX_STANDARD} standard")
+
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
+
+if(UNIX)
+  set(CMAKE_SKIP_RPATH OFF)
+  set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
+  set(CMAKE_INSTALL_RPATH "$ORIGIN:$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+endif()
+
+# ##############################################################################
+# Compilation flags
+
+if(MSVC)
+  add_compile_options(/Zc:__cplusplus /utf-8)
+else()
+  add_compile_options(-Wall -Wextra -pedantic)
+  add_compile_options(-Wno-missing-field-initializers)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options($<$<CONFIG:Debug>:-fstandalone-debug>)
+  endif()
+endif()
+
+if(OPTION_DEBUG_USE_SANITIZERS)
+  message("Using sanitizers for Debug")
+  if(MSVC)
+    add_compile_options($<$<CONFIG:Debug>:/fsanitize=address>)
+  else()
+    add_compile_options($<$<CONFIG:Debug>:-fsanitize=address,undefined,leak>)
+    add_link_options($<$<CONFIG:Debug>:-fsanitize=address,undefined,leak>)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+      add_link_options($<$<CONFIG:Debug>:-shared-libsan>)
+    endif()
+  endif()
+endif()
+
+# ##############################################################################
+# Prepare `uxs` library
+
+block()
+set(UXS_USE_ZLIB OFF)
+set(UXS_USE_LIBZIP OFF)
+set(UXS_BUILD_STATIC_ONLY ON)
+set(UXS_DO_INSTALL OFF)
+FetchContent_Declare(uxs SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/uxs)
+FetchContent_MakeAvailable(uxs)
+endblock()
+
+# ##############################################################################
+# Add `jsonfmt` build target
+
+file(GLOB_RECURSE sources src/*.h;src/*.cpp)
+
+add_executable(jsonfmt ${sources})
+
+target_compile_definitions(jsonfmt PRIVATE VERSION=${VERSION})
+target_link_libraries(jsonfmt PRIVATE UXS::UXS-static)
+
+install(TARGETS jsonfmt RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+                                COMPONENT binaries)
+install_win32_pdb(jsonfmt)
+
+# ##############################################################################
+# Auxiliary
+
+include("uxs/cmake/macros.cmake")
+add_compile_defs_and_include_dirs_targets(jsonfmt ${CMAKE_CURRENT_SOURCE_DIR})

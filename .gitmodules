@@ -1,0 +1,3 @@
+[submodule "uxs"]
+	path = uxs
+	url = ../uxs.git
